@@ -1,0 +1,1 @@
+add_library(ed25519 src/add_scalar.c src/fe.c src/ge.c src/key_exchange.c src/keypair.c src/sc.c src/seed.c src/sha512.c src/sign.c src/verify.c)
