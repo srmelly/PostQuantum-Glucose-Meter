@@ -25,7 +25,7 @@
 #define DEBUG_printf printf
 #define BUF_SIZE 64
 
-#define TEST_ITERATIONS 2
+#define TEST_ITERATIONS 3
 #define POLL_TIME_S 10
 
 #if 0
@@ -66,6 +66,9 @@ typedef struct TCP_CLIENT_T_ {
     unsigned char bob_id_public_key[32]; //Bob's Signed prekey public
     unsigned char dh1_alice[32];
     unsigned char dh2_alice[32];
+    unsigned char dh3_alice[32];
+    unsigned char dh_final_alice[96];
+    unsigned char hex_hkdf_output_alice[128];
     
 } TCP_CLIENT_T;
 
@@ -181,12 +184,7 @@ if(state->run_count < 1)
     {
         state->bob_spk_public_key[i] = state->buffer[i];
     }
-     for(int i=0; i< 32; i++) {
     
-    printf("%d", state->bob_spk_public_key[i]);
-    
-    } 
-     printf("\n");
      //Verifying on Alice's side
     ed25519_create_seed(state->alice_seed);
     ed25519_create_keypair(state->alice_id_public_key, state-> alice_id_private_key, state-> alice_seed);
@@ -195,13 +193,6 @@ if(state->run_count < 1)
     ed25519_create_seed(state->alice_seed);
     ed25519_create_keypair(state->alice_ephemeral_public_key,state-> alice_ephemeral_private_key, state->alice_seed);
 
-    for(int i=0; i< 32; i++) {
-    
-    printf("%d", state->alice_id_public_key[i]);
-    
-    }
-     printf("\n");
-    
     
 }
     // If we have received the whole buffer, send it back to the server
@@ -216,14 +207,8 @@ if(state->run_count < 1)
         err_t err = tcp_write(tpcb, state->alice_id_public_key, state->buffer_len,TCP_WRITE_FLAG_COPY);
         
          ed25519_key_exchange(state->dh1_alice, state->bob_spk_public_key, state->alice_id_private_key);
-    printf("Verifying dh1\n");
+    printf("Exchanging DH1\n");
     
-    for (int i = 0; i < 32; i++) {
-            // printf("%d\t%d\n",dh1_alice[i], dh1_bob[i]);
-           printf("%d",state-> dh1_alice[i]);
-            }
-            
-            printf("\n");
         }
         
         
@@ -239,14 +224,36 @@ if(state->run_count < 1)
     }
         
         ed25519_key_exchange(state->dh2_alice, state->bob_id_public_key, state->alice_ephemeral_private_key);
-    printf("Verifying dh2\n");
+    printf("Exchanging DH2\n");
     
-    for (int i = 0; i < 32; i++) {
-            // printf("%d\t%d\n",dh1_alice[i], dh1_bob[i]);
-           printf("%d",state-> dh2_alice[i]);
-            }
-            
-            printf("\n");
+    
+        }
+        
+         if (state->run_count == 2) 
+       {
+         
+         DEBUG_printf("Writing %d bytes to server\n", state->buffer_len);
+        err_t err = tcp_write(tpcb, state -> alice_ephemeral_public_key, state->buffer_len,TCP_WRITE_FLAG_COPY);
+         ed25519_key_exchange(state-> dh3_alice, state-> bob_spk_public_key, state->alice_ephemeral_private_key);
+         
+         printf("Exchanging DH3\n");
+    
+            for(int j=0; j<96;j++)
+    {
+        if(j<32) state->dh_final_alice[j] = state->dh1_alice[j]; 
+        if(j>=32 && j< 64)  state->dh_final_alice[j] = state->dh2_alice[j%32]; 
+        if(j>=64)  state->dh_final_alice[j] = state->dh3_alice[j%32]; 
+    }
+        
+     get_shared_key(state -> dh_final_alice, SHA512, NULL, NULL, state->hex_hkdf_output_alice, 128);
+        
+        
+         for(int i=0; i<128;i++)
+    {
+        // if (i%16 == 0) printf("\t");
+        printf("%d\n",state -> hex_hkdf_output_alice[i]);
+        
+    }
         }
         
         /* if (state->run_count == 2) 
@@ -256,10 +263,6 @@ if(state->run_count < 1)
         
         }*/
         
-        if (err != ERR_OK) {
-            DEBUG_printf("Failed to write data %d\n", err);
-            return tcp_result(arg, -1);
-        }
     
     return ERR_OK;
 }
@@ -360,6 +363,34 @@ int main() {
     run_tcp_client_test();
     cyw43_arch_deinit();
     return 0;
+}
+
+void get_shared_key(unsigned char *dh_final, SHAversion whichSha, const unsigned char *salt, const unsigned char *info,
+     unsigned char* output_key, int okm_len){
+    int salt_len; //The length of the salt value (a non-secret random value) (ignored if SALT==NULL)
+    int info_len; // The length of optional context and application (ignored if info==NULL)
+    int ikm_len; //The length of the input keying material
+    uint8_t okm_integer[okm_len]; //output keying material - okm
+    ikm_len = 96;
+    // printf("%d\n", ikm_len);
+    if(salt == NULL) salt_len = 0;
+    if(info == NULL) info_len = 0;
+
+
+
+    if(hkdf(whichSha,salt,salt_len,dh_final,ikm_len,info,info_len,okm_integer,okm_len) == 0)
+    {
+        printf("HKDF Shared secret):\n");
+    } else {
+        fprintf(stderr, "\nHKDF is invalid\n");
+    }
+
+    for(int i=0; i<okm_len;i++)
+    {
+        output_key[i] = okm_integer[i];
+        // printf("%d\n", output_key[i]);
+    }
+
 }
 
 
