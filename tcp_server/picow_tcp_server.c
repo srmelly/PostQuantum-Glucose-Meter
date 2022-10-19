@@ -28,7 +28,7 @@
 #define TCP_PORT 4242
 #define DEBUG_printf printf
 #define BUF_SIZE 64
-#define TEST_ITERATIONS 2
+#define TEST_ITERATIONS 3
 #define POLL_TIME_S 10
 
 typedef struct TCP_SERVER_T_ {
@@ -51,6 +51,9 @@ typedef struct TCP_SERVER_T_ {
     unsigned char bob_spk_signature[64];
     unsigned char dh1_bob[32];
     unsigned char dh2_bob[32];
+    unsigned char dh3_bob[32];
+    unsigned char dh_final_bob[96];
+    unsigned char hex_hkdf_output_bob[128];
     
 } TCP_SERVER_T;
 
@@ -171,10 +174,7 @@ err_t tcp_server_send_data(void *arg, struct tcp_pcb *tpcb)
        {
            DEBUG_printf("Writing %ld bytes to phone\n", BUF_SIZE);
         err_t err = tcp_write(tpcb, state->bob_spk_public_key, 32, TCP_WRITE_FLAG_COPY);
-         for (int i = 0; i < 32 ; i++)
-    {
-        printf("%d", state->bob_spk_public_key[i]);
-    }
+         
         if (err != ERR_OK) {
         DEBUG_printf("Failed to write data %d\n", err);
         return tcp_server_result(arg, -1);}
@@ -191,6 +191,15 @@ err_t tcp_server_send_data(void *arg, struct tcp_pcb *tpcb)
         
         }
         
+         if (state->run_count == 2) 
+       {
+           DEBUG_printf("Writing %ld bytes to phone\n", BUF_SIZE);
+        err_t err = tcp_write(tpcb, state -> bob_id_public_key, 32 ,TCP_WRITE_FLAG_COPY);
+         if (err != ERR_OK) {
+        DEBUG_printf("Failed to write data %d\n", err);
+        return tcp_server_result(arg, -1);}
+        
+        }
     
     state->sent_len = 0;
     DEBUG_printf("Writing %ld bytes to phone\n", BUF_SIZE);
@@ -248,20 +257,9 @@ err_t tcp_server_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err
             state->alice_id_public_key[i] = state -> buffer_recv[i];
         }
         
-         for(int i=0; i < 32; i++) 
-         {
-    
-             printf("%d", state->alice_id_public_key[i]);
-    
-         }
     	 ed25519_key_exchange(state->dh1_bob, state->alice_id_public_key, state->bob_spk_private_key);
-    	  printf("Verifying dh1\n");
-    for (int i = 0; i < 32; i++) {
-            // printf("%d\t%d\n",dh1_alice[i], dh1_bob[i]);
-           printf("%d",state->dh1_bob[i]);
-            }
-            
-            printf("\n");
+    	  printf("Exchanging DH1\n");
+    
            
     
     }
@@ -276,14 +274,34 @@ err_t tcp_server_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err
         }
         
     	 ed25519_key_exchange(state->dh2_bob, state->alice_ephemeral_public_key, state->bob_id_private_key);
-    	  printf("Verifying dh2\n");
-    for (int i = 0; i < 32; i++) {
-            // printf("%d\t%d\n",dh1_alice[i], dh1_bob[i]);
-           printf("%d",state->dh2_bob[i]);
-            }
-            
-            printf("\n");
+    	  printf("Exchanging DH2\n");
+    
            
+    
+    }
+    
+     if(state->run_count == 2)
+    {
+    	//DH1 = DH(IKA, SPKB)
+       
+    	ed25519_key_exchange(state->dh3_bob, state->alice_ephemeral_public_key, state->bob_spk_private_key);
+    	 
+    	  printf("Exchanging DH3\n");
+   
+           
+           for(int j=0; j<96;j++)
+    {
+        if(j<32)state-> dh_final_bob[j] =state-> dh1_bob[j]; 
+        if(j>=32 && j< 64) state-> dh_final_bob[j] = state->dh2_bob[j%32]; 
+        if(j>=64)  state->dh_final_bob[j] = state->dh3_bob[j%32]; 
+    }
+    get_shared_key(state->dh_final_bob, SHA512, NULL, NULL, state->hex_hkdf_output_bob, 128);
+     for(int i=0; i<128;i++)
+    {
+        // if (i%16 == 0) printf("\t");
+        printf("%d\n",state -> hex_hkdf_output_bob[i]);
+        
+    }
     
     }
     
@@ -585,7 +603,7 @@ void get_shared_key(unsigned char *dh_final, SHAversion whichSha, const unsigned
 
     if (hkdf(whichSha, salt, salt_len, dh_final, ikm_len, info, info_len, okm_integer, okm_len) == 0)
     {
-        printf("HKDF is valid\n");
+        printf("HKDF (shared secret):\n");
     }
     else
     {
@@ -595,9 +613,11 @@ void get_shared_key(unsigned char *dh_final, SHAversion whichSha, const unsigned
     for (int i = 0; i < okm_len; i++)
     {
         output_key[i] = okm_integer[i];
-        printf("%d", output_key[i]);
+        //printf("%d", output_key[i]);
     }
 }
+    
+    
     
     
    
