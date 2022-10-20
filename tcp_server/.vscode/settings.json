@@ -1,0 +1,10 @@
+{
+    "files.associations": {
+        "crypto_aead.h": "c",
+        "ed25519.h": "c",
+        "sha.h": "c",
+        "stdlib.h": "c",
+        "time.h": "c"
+    },
+    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools"
+}

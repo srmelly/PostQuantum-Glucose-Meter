@@ -1,61 +1,34 @@
-if (TEST_TCP_SERVER_IP)
-   message("Skipping tcp_client example as TEST_TCP_SERVER_IP is not defined")
-   
-else()
-    add_executable(picow_tcpip_client_background
-            picow_tcp_client.c
-            )
-    target_compile_definitions(picow_tcpip_client_background PRIVATE
-            WIFI_SSID=\"${TP-Link_A15C}\"
-            WIFI_PASSWORD=\"${43193455}\"
-            TEST_TCP_SERVER_IP=\"${192.168.0.100}\"
-            )
-    target_include_directories(picow_tcpip_client_background PRIVATE
-            ${CMAKE_CURRENT_LIST_DIR}
-            ${CMAKE_CURRENT_LIST_DIR}/.. # for our common lwipopts
-            
-            )
-    target_link_libraries(picow_tcpip_client_background
-            pico_cyw43_arch_lwip_threadsafe_background
-            pico_stdlib
-            )
+# Generated Cmake Pico project file
 
-add_subdirectory(include tinyJambu)
-target_include_directories(tinyJambu PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
+cmake_minimum_required(VERSION 3.13)
 
-target_link_libraries(picow_tcpip_client_background ed25519 sha tinyJambu)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 
-# enable usb output, disable uart output
-    pico_enable_stdio_usb(picow_tcpip_client_background 1)
-    pico_enable_stdio_uart(picow_tcpip_client_background 0)
-    pico_add_extra_outputs(picow_tcpip_client_background)
-    
-    add_executable(picow_tcpip_client_poll
-            picow_tcp_client.c
-            )
-    target_compile_definitions(picow_tcpip_client_poll PRIVATE
-            WIFI_SSID=\"${TP-Link_A15C}\"
-            WIFI_PASSWORD=\"${43193455}\"
-            TEST_TCP_SERVER_IP=\"${192.168.0.100}\"
-            )
-    target_include_directories(picow_tcpip_client_poll PRIVATE
-            ${CMAKE_CURRENT_LIST_DIR}
-            ${CMAKE_CURRENT_LIST_DIR}/.. # for our common lwipopts
-            )
-    target_link_libraries(picow_tcpip_client_poll
-            pico_cyw43_arch_lwip_poll
-            pico_stdlib 
-            )
-    
-    
-    # enable usb output, disable uart output
-    pico_enable_stdio_usb(picow_tcpip_client_poll 1)
-    pico_enable_stdio_uart(picow_tcpip_client_poll 0)
-    pico_add_extra_outputs(picow_tcpip_client_poll)
-    
-target_include_directories(tinyJambu PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
+# Initialise pico_sdk from installed location
+# (note this can come from environment, CMake cache etc)
+set(PICO_SDK_PATH "/home/nasa/Downloads/pico-sdk")
 
-target_link_libraries(picow_tcpip_client_poll ed25519 sha tinyJambu)
+# Pull in Raspberry Pi Pico SDK (must be before project)
+include(pico_sdk_import.cmake)
 
+project(t C CXX ASM)
 
-endif()
+# Initialise the Raspberry Pi Pico SDK
+pico_sdk_init()
+
+# Add executable. Default name is the project name, version 0.1
+
+add_executable(t t.c )
+
+pico_set_program_name(t "t")
+pico_set_program_version(t "0.1")
+
+pico_enable_stdio_uart(t 1)
+pico_enable_stdio_usb(t 0)
+
+# Add the standard library to the build
+target_link_libraries(t pico_stdlib)
+
+pico_add_extra_outputs(t)
+
