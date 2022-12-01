@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include "../X3DH/ed25519/src/ed25519.h"
 #include "../X3DH/sha/rfc6234/sha.h"
+#include "include/tinyJambu/crypto_aead.h"
 
 #if !defined(TEST_TCP_SERVER_IP)
 #error TEST_TCP_SERVER_IP not defined
@@ -25,7 +26,7 @@
 #define DEBUG_printf printf
 #define BUF_SIZE 64
 
-#define TEST_ITERATIONS 3
+#define TEST_ITERATIONS 4
 #define POLL_TIME_S 10
 
 #if 0
@@ -69,6 +70,7 @@ typedef struct TCP_CLIENT_T_ {
     unsigned char dh3_alice[32];
     unsigned char dh_final_alice[96];
     unsigned char hex_hkdf_output_alice[128];
+    unsigned char cipher[32];
     
 } TCP_CLIENT_T;
 
@@ -92,6 +94,9 @@ static err_t tcp_client_close(void *arg) {
     return err;
 }
 
+void decrypt(const unsigned char* c, unsigned long long clen, const unsigned char* k);
+void encrypt(const unsigned char* m, unsigned long long mlen, const unsigned char* k);
+
 // Called with results of operation
 static err_t tcp_result(void *arg, int status) {
     TCP_CLIENT_T *state = (TCP_CLIENT_T*)arg;
@@ -109,7 +114,7 @@ static err_t tcp_client_sent(void *arg, struct tcp_pcb *tpcb, u16_t len) {
     DEBUG_printf("tcp_client_sent %u\n", len);
     state->sent_len += len;
 
-    if (state->sent_len <= BUF_SIZE) {//->buffer
+    if (state->sent_len <= BUF_SIZE || state->sent_len > BUF_SIZE) {//->buffer
 
         state->run_count++;
         if (state->run_count >= TEST_ITERATIONS) {
@@ -208,7 +213,7 @@ if(state->run_count < 1)
         
          ed25519_key_exchange(state->dh1_alice, state->bob_spk_public_key, state->alice_id_private_key);
     printf("Exchanging DH1\n");
-    
+   
         }
         
         
@@ -245,29 +250,66 @@ if(state->run_count < 1)
         if(j>=64)  state->dh_final_alice[j] = state->dh3_alice[j%32]; 
     }
         
-     get_shared_key(state -> dh_final_alice, SHA512, NULL, NULL, state->hex_hkdf_output_alice, 128);
+     get_shared_key(state -> dh_final_alice, SHA512, NULL, NULL, state -> hex_hkdf_output_alice, 128);
         
         
-         for(int i=0; i<128;i++)
+        
+         for(int i=0; i<16;i++)
     {
         // if (i%16 == 0) printf("\t");
-        printf("%d\n",state -> hex_hkdf_output_alice[i]);
+        printf("%02X\n",state -> hex_hkdf_output_alice[i]);
         
     }
+    
         }
         
-        /* if (state->run_count == 2) 
+         if (state->run_count == 3) 
        {
-           DEBUG_printf("Writing %d bytes to server\n", state->buffer_len);
-        err_t err = tcp_write(tpcb,state -> spk_sig, state->buffer_len,TCP_WRITE_FLAG_COPY);
-        
-        }*/
-        
+       		
+   DEBUG_printf("Writing %d bytes to server\n", state->buffer_len);
+        err_t err = tcp_write(tpcb,state ->  alice_ephemeral_public_key, state->buffer_len,TCP_WRITE_FLAG_COPY);
+   
+    unsigned long long c_length = 16;
+    unsigned char result[c_length];  
     
+    
+    for (int i = 0; i < c_length; i++)
+    {
+        result[i] = state->buffer[i];
+    }
+    
+    
+    for(int i=0; i< c_length;i++)
+    {
+      printf("%02X|", result[i]);
+    }
+    
+    printf("\n");
+    
+    unsigned long long clen = sizeof(result); 
+    unsigned char k[16];
+    
+    for (int i = 0; i < sizeof(k); i++)
+    {
+        k[i] = state->hex_hkdf_output_alice[i];
+    }
+    
+    
+    
+     //encrypt(sampleResult, M_SIZE, state -> hex_hkdf_output_alice, c, &c_length);
+     decrypt(result, clen , k);
+      }
+    
+            
     return ERR_OK;
 }
 
+return ERR_OK;
 }
+
+ 
+
+
 
 static bool tcp_client_open(void *arg) {
     TCP_CLIENT_T *state = (TCP_CLIENT_T*)arg;
@@ -305,7 +347,7 @@ static TCP_CLIENT_T* tcp_client_init(void) {
         DEBUG_printf("failed to allocate state\n");
         return NULL;
     }
-    ip4addr_aton("192.168.0.102", &state->remote_addr);
+    ip4addr_aton("192.168.0.119", &state->remote_addr);
     return state;
 }
 
@@ -346,7 +388,10 @@ int main() {
     else printf("\n");
     
   }
-
+	
+	
+   
+    
     if (cyw43_arch_init()) {
         DEBUG_printf("failed to initialise\n");
         return 1;
@@ -362,6 +407,8 @@ int main() {
     }
     run_tcp_client_test();
     cyw43_arch_deinit();
+    
+    
     return 0;
 }
 
@@ -391,6 +438,45 @@ void get_shared_key(unsigned char *dh_final, SHAversion whichSha, const unsigned
         // printf("%d\n", output_key[i]);
     }
 
+}
+
+void decrypt(const unsigned char* c, unsigned long long clen, const unsigned char* k){
+    unsigned long long m_length = 8;                               // plaintext length
+    unsigned char m[m_length];                                      // plaintext
+    unsigned long long *mlen = &m_length;                           // plaintext length pointer
+    const unsigned char ad[] = {0x00};                              // associated data
+    unsigned long long adlen = sizeof(ad);                          // associated data length
+    unsigned char *nsec;                                            // secret message number
+    const unsigned char npub[] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B};  // public message number
+
+    crypto_aead_decrypt(m, mlen, nsec, c, clen, ad, adlen, npub, k);
+
+    // print
+    printf("Plaintext = ");
+    for (int i = 0; i < m_length; i++){
+        printf("%c", m[i]);
+        //printf("%02X", m[i]);
+    }
+    printf("\n");
+}
+
+void encrypt(const unsigned char* m, unsigned long long mlen, const unsigned char* k){
+    unsigned long long c_length = 80;                               // ciphertext length
+    unsigned char c[c_length];                                      // ciphertext
+    unsigned long long *clen = &c_length;                           // ciphertext length pointer
+    const unsigned char ad[] = {0x00};                              // associated data
+    unsigned long long adlen = sizeof(ad);                          // associated data length
+    const unsigned char *nsec;                                      // secret message number
+    const unsigned char npub[] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B};  // public message number
+
+    crypto_aead_encrypt(c, clen, m, mlen, ad, adlen, nsec, npub, k);
+
+    printf("\n");
+    printf("Ciphertext = ");
+    for (int i = 0; i < c_length; i++){
+        printf("%02X", c[i]);
+    }
+    printf("\n");
 }
 
 
