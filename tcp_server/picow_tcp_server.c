@@ -28,15 +28,25 @@
 #define TCP_PORT 4242
 #define DEBUG_printf printf
 #define BUF_SIZE 64
-#define TEST_ITERATIONS 3
+#define TEST_ITERATIONS 4
 #define POLL_TIME_S 10
+
+
+int FetchPreKeyBundle(unsigned char *bob_id_public_key, unsigned char *bob_spk_public_key, unsigned char *bob_spk_signature, int message_type){};
+void get_dh_output(unsigned char *bob_id_public_key, unsigned char *ephemeral_private_key, unsigned char *id_private_key,
+                   unsigned char *bob_spk_public_key, unsigned char *dh_final);
+void get_shared_key(unsigned char *dh_final, SHAversion whichSha, const unsigned char *salt_len, const unsigned char *info,
+                    unsigned char *output_key, int okm_len);
+void encrypt(const unsigned char *m, unsigned long long mlen, const unsigned char *k, char* c, uint64_t* c_length);
+
+void decrypt(const unsigned char *c, const unsigned char *m, unsigned long long clen, const unsigned char *k, uint64_t* m_length);
 
 typedef struct TCP_SERVER_T_ {
     struct tcp_pcb *server_pcb;
     struct tcp_pcb *client_pcb;
     bool complete;
     unsigned char buffer_sent[BUF_SIZE];
-    unsigned char conn[BUF_SIZE]; 
+    unsigned char conn[8]; 
     char buffer_recv[BUF_SIZE];
     int sent_len;
     int recv_len;
@@ -54,6 +64,8 @@ typedef struct TCP_SERVER_T_ {
     unsigned char dh3_bob[32];
     unsigned char dh_final_bob[96];
     unsigned char hex_hkdf_output_bob[128];
+    unsigned char cipher[32];
+    
     
 } TCP_SERVER_T;
 
@@ -172,6 +184,7 @@ err_t tcp_server_send_data(void *arg, struct tcp_pcb *tpcb)
     
     if (state->run_count == 0) 
        {
+           //send bob spk public key to client
            DEBUG_printf("Writing %ld bytes to phone\n", BUF_SIZE);
         err_t err = tcp_write(tpcb, state->bob_spk_public_key, 32, TCP_WRITE_FLAG_COPY);
          
@@ -182,7 +195,7 @@ err_t tcp_server_send_data(void *arg, struct tcp_pcb *tpcb)
         }
         
          if (state->run_count == 1) 
-       {
+       {   //send bob id public key
            DEBUG_printf("Writing %ld bytes to phone\n", BUF_SIZE);
         err_t err = tcp_write(tpcb, state -> bob_id_public_key, 32 ,TCP_WRITE_FLAG_COPY);
          if (err != ERR_OK) {
@@ -200,9 +213,20 @@ err_t tcp_server_send_data(void *arg, struct tcp_pcb *tpcb)
         return tcp_server_result(arg, -1);}
         
         }
+        
+         if (state->run_count == 3) 
+       {
+           DEBUG_printf("Writing %ld bytes to phone\n", BUF_SIZE);
+        err_t err = tcp_write(tpcb, state -> cipher, 16 ,TCP_WRITE_FLAG_COPY);
+         if (err != ERR_OK) {
+        DEBUG_printf("Failed to write data %d\n", err);
+        return tcp_server_result(arg, -1);}
+        
+        }
+            
     
     state->sent_len = 0;
-    DEBUG_printf("Writing %ld bytes to phone\n", BUF_SIZE);
+    
     // this method is callback from lwIP, so cyw43_arch_lwip_begin is not required, however you
     // can use this method to cause an assertion in debug mode, if this method is called when
     //cyw43_arch_lwip_begin IS needed
@@ -214,11 +238,9 @@ err_t tcp_server_send_data(void *arg, struct tcp_pcb *tpcb)
         DEBUG_printf("Failed to write data %d\n", err);
         return tcp_server_result(arg, -1);
     }*/
-   // return ERR_OK;
-    return 0;
+    return ERR_OK;
+    
 }
-
-
 
 err_t tcp_server_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err) {
 	
@@ -282,6 +304,8 @@ err_t tcp_server_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err
     
      if(state->run_count == 2)
     {
+    
+    
     	//DH1 = DH(IKA, SPKB)
        
     	ed25519_key_exchange(state->dh3_bob, state->alice_ephemeral_public_key, state->bob_spk_private_key);
@@ -302,8 +326,49 @@ err_t tcp_server_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err
         printf("%d\n",state -> hex_hkdf_output_bob[i]);
         
     }
+    printf("end\n");
+     
+     const size_t SIZE_OF_END = 0;
+    // const size_t BUFFER_SIZE = ((SAMPLE_FREQUENCY * BYTES_PER_SAMPLE) / 2);
+    const size_t BUFFER_SIZE = 8;
+    // below stores 8, 32-bit values
+    // const size_t BUFFER_SIZE = ((BYTES_PER_SAMPLE) * 8);
+
+    // const size_t SAMPLE_ARR_SIZE = BUFFER_SIZE + SIZE_OF_END;
+    const size_t SAMPLE_ARR_SIZE = BUFFER_SIZE + SIZE_OF_END;
+     unsigned long long c_length = 16;                                          // ciphertext length
+    unsigned char c[c_length];  
+    
+    //unsigned long long m_length = 24;
+    //unsigned char m[m_length];  
+     
+    unsigned char sampleArr[SAMPLE_ARR_SIZE];
+    for(int i=0; i<8;i++)
+    {
+        sampleArr[i] = state->conn[i];
+    }
+    
+    
+     unsigned char k[16];
+    
+    for (int i = 0; i < sizeof(k); i++)
+    {
+        k[i] = state->hex_hkdf_output_bob[i];
+    }
+    
+    
+    encrypt(sampleArr, SAMPLE_ARR_SIZE, state -> hex_hkdf_output_bob, c, &c_length);
+    //decrypt(c, m, c_length, state -> hex_hkdf_output_bob, &m_length);
+  
+  
+    for(int i=0; i< 32;i++)
+    {
+      state ->cipher[i] = c[i];
+    }
+    
     
     }
+    
     
     // Have we have received the whole buffer
    if (state->recv_len == BUF_SIZE || state->recv_len != BUF_SIZE) {
@@ -406,7 +471,7 @@ int n = log10(conn) + 1;
     state->conn[6] = 'd';
     state->conn[7] = 'L';
     
-     
+   
     if (!state) {
         return;
     }
@@ -454,12 +519,6 @@ int compute(int a, int m, int n)
     return y;
 }
 
-int FetchPreKeyBundle(unsigned char *bob_id_public_key, unsigned char *bob_spk_public_key, unsigned char *bob_spk_signature, int message_type){};
-void get_dh_output(unsigned char *bob_id_public_key, unsigned char *ephemeral_private_key, unsigned char *id_private_key,
-                   unsigned char *bob_spk_public_key, unsigned char *dh_final);
-void get_shared_key(unsigned char *dh_final, SHAversion whichSha, const unsigned char *salt_len, const unsigned char *info,
-                    unsigned char *output_key, int okm_len);
-void encrypt(const unsigned char *m, unsigned long long mlen, const unsigned char *k, char* c, uint64_t* c_length);
 
 int main() {
     char ssid[] = "TP-Link_A15C";
@@ -507,14 +566,14 @@ int main() {
    // compute concentration
   current_voltage = adc_read() * (3.3f / (1 << 12));
 
-  float conn = 495.6 * current_voltage - 1266 + 150 + 1000;
+  float conn = 495.6 * current_voltage - 1266 + 150 + 1000 + 300;
   
 printf("Check phone for results\n");
   //unit8_t concentration = conn;
   printf("%f mg/dL\n", conn);
 int con = conn;
    
-//     int i = 10;
+//     int i = 10;:picow_tcp_server.c:((.text.tcp_server_recv.text.tcp_server_recv+0x+0x216)216: undefined reference to `)crypto_aead_encrypt: u
 //  while (i--) {
 //    printf("Countdown %i\n", i);
 //    sleep_ms(1000);
@@ -559,6 +618,7 @@ void encrypt(const unsigned char *m, unsigned long long mlen, const unsigned cha
     {
         printf("%02X|", c[i]);
     }
+    printf("\n");
 }
 
 void get_dh_output(unsigned char *bob_id_public_key, unsigned char *alice_ephemeral_private_key, unsigned char *alice_id_private_key,
@@ -616,6 +676,26 @@ void get_shared_key(unsigned char *dh_final, SHAversion whichSha, const unsigned
         //printf("%d", output_key[i]);
     }
 }
+    
+void decrypt(const unsigned char *c, const unsigned char *m, unsigned long long clen, const unsigned char *k, uint64_t* m_length)
+{
+    unsigned long long *mlen = m_length;                                                                    // plaintext length pointer
+    const unsigned char ad[] = {0x00};                                                                     // associated data
+    unsigned long long adlen = sizeof(ad);                                                                 // associated data length
+    unsigned char *nsec;                                                                                   // secret message number
+    const unsigned char npub[] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B}; // public message number
+
+    crypto_aead_decrypt(m, mlen, nsec, c, clen, ad, adlen, npub, k);
+
+    // print
+    printf("Plaintext = ");
+    for (int i = 0; i < *m_length; i++)
+    {
+        printf("%02X|", m[i]);
+    }
+    printf("\n");
+}
+
     
     
     
